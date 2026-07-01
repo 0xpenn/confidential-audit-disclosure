@@ -1,29 +1,22 @@
-# Session Handoff Log
+# Confidential Audit Disclosure — Build Log
 
-## Session 1 — June 30 2026
-**Done:**
-- FHEVM Hardhat template cloned and configured
-- npm audit triaged (clean for runtime deps)
-- Compiled + tests passed
-- Credentials set via `npx hardhat vars set` (MNEMONIC + INFURA_API_KEY)
-- FHECounter deployed to Sepolia ✅ `0xD7e71fA7Ce7Cca24C4a92AcE73ac172CE1cE3f57`
-- Repo pushed to GitHub ✅
+## Status: In Progress | Deadline: July 7 2026 23:59 AOE
 
-**Next session:**
-Write `AuditDisclosure.sol` — `submit()` function with `euint8` encrypted severity score, then owner approve/reject/auto-reveal state machine, 7-day deadline cutoff.
+## Done
+- FHEVM pipeline confirmed: compile → test → Sepolia deploy ✅
+- AuditDisclosure.sol: full state machine, compiles clean ✅
+- Deploy script: both contracts deploy locally ✅
+- Repo live: github.com/0xpenn/confidential-audit-disclosure ✅
 
-**Deadline:** July 7 2026 23:59 AOE (6 days left)# Session Handoff Log
+## Deployment Addresses
+- FHECounter (Sepolia): 0xD7e71fA7Ce7Cca24C4a92AcE73ac172CE1cE3f57
+- AuditDisclosure: local only — Sepolia deploy next session
 
-## Session 1 — June 30 2026
-**Done:**
-- FHEVM Hardhat template cloned and configured
-- npm audit triaged (clean for runtime deps)
-- Compiled + tests passed
-- Credentials set via `npx hardhat vars set` (MNEMONIC + INFURA_API_KEY)
-- FHECounter deployed to Sepolia ✅ `0xD7e71fA7Ce7Cca24C4a92AcE73ac172CE1cE3f57`
-- Repo pushed to GitHub ✅
+## Up Next
+1. Tests in mock mode — submit, approve, reject, dispute, reveal
+2. Deploy AuditDisclosure to Sepolia
+3. Frontend — submit form + status display
+4. README + submission write-up
 
-**Next session:**
-Write `AuditDisclosure.sol` — `submit()` function with `euint8` encrypted severity score, then owner approve/reject/auto-reveal state machine, 7-day deadline cutoff.
-
-**Deadline:** July 7 2026 23:59 AOE (6 days left)
+## Stack
+Hardhat 2.28.6 · FHEVM · Sepolia · credentials via hardhat vars
