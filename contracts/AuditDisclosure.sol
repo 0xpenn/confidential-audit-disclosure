@@ -5,8 +5,10 @@ import {FHE, euint8, externalEuint8} from "@fhevm/solidity/lib/FHE.sol";
 import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 
 /// @title AuditDisclosure
-/// @notice Confidential vulnerability disclosure with FHE-encrypted severity scores
-/// @dev Severity scale: 1=Low, 2=Medium, 3=High, 4=Critical
+/// @author 0xpenn
+/// @notice Confidential vulnerability disclosure — severity stays encrypted until
+///         owner acts or the 7-day hard cutoff triggers a trustless public reveal.
+/// @dev Severity scale: 1=Low 2=Medium 3=High 4=Critical (euint8, FHE-encrypted)
 contract AuditDisclosure is ZamaEthereumConfig {
 
     // ── State machine ──────────────────────────────────────────────
@@ -29,6 +31,9 @@ contract AuditDisclosure is ZamaEthereumConfig {
     uint256 public constant DEADLINE = 7 days;
     uint256 public reportCount;
     mapping(uint256 => Report) public reports;
+
+    // researcher => list of reportIds they submitted
+    mapping(address => uint256[]) private reportsByResearcher;
 
     // ── Events ─────────────────────────────────────────────────────
     event ReportSubmitted(uint256 indexed reportId, address indexed researcher);
@@ -59,9 +64,12 @@ contract AuditDisclosure is ZamaEthereumConfig {
     }
 
     // ── submit() ───────────────────────────────────────────────────
-    // inputProof is a ZK proof verifying the researcher knows the plaintext
-    // severity without revealing it — required by FHEVM to prevent replay attacks.
-    // externalEuint8 has no data location specifier — it is a value type.
+    /// @notice Submit an encrypted severity score + off-chain report hash.
+    /// @dev inputProof is a ZK proof binding the ciphertext to this sender —
+    ///      prevents replay of someone else's encrypted input.
+    /// @param encryptedSeverity FHE ciphertext of severity (1–4)
+    /// @param inputProof ZK proof generated client-side via fhevm.js
+    /// @param descriptionHash keccak256 of the off-chain report (IPFS CID or similar)
     function submit(
         externalEuint8 encryptedSeverity,
         bytes calldata inputProof,
@@ -83,12 +91,14 @@ contract AuditDisclosure is ZamaEthereumConfig {
             revealed:        false
         });
 
+        reportsByResearcher[msg.sender].push(reportId);
         emit ReportSubmitted(reportId, msg.sender);
     }
 
     // ── approve() ──────────────────────────────────────────────────
-    // Owner approves finding and pays researcher in ETH.
-    // msg.value must match the intended payment.
+    /// @notice Approve a finding and pay the researcher in ETH.
+    /// @dev msg.value is forwarded directly — no escrow, no intermediary.
+    /// @param reportId Target report
     function approve(uint256 reportId)
         external
         payable
@@ -106,8 +116,10 @@ contract AuditDisclosure is ZamaEthereumConfig {
     }
 
     // ── reject() ───────────────────────────────────────────────────
-    // Owner rejects with a mandatory public reason — permanent on-chain accountability.
-    // Empty reason string is blocked — owner cannot silently reject.
+    /// @notice Reject a finding with a mandatory public reason.
+    /// @dev Empty reason reverts — silent rejection isn't an option.
+    /// @param reportId Target report
+    /// @param reason Plaintext rejection rationale, permanent on-chain
     function reject(uint256 reportId, string calldata reason)
         external
         onlyOwner
@@ -124,9 +136,10 @@ contract AuditDisclosure is ZamaEthereumConfig {
     }
 
     // ── reveal() ───────────────────────────────────────────────────
-    // Anyone can call this after 7 days — trustless enforcement.
-    // makePubliclyDecryptable() returns the updated handle — must reassign.
-    // Verified against installed FHE.sol line 8919.
+    /// @notice Trigger public reveal after the 7-day deadline.
+    /// @dev Callable by anyone — trustless enforcement, no owner involvement needed.
+    ///      makePubliclyDecryptable() returns an updated handle, must reassign.
+    /// @param reportId Target report
     function reveal(uint256 reportId)
         external
         reportExists(reportId)
@@ -146,8 +159,8 @@ contract AuditDisclosure is ZamaEthereumConfig {
     }
 
     // ── dispute() ──────────────────────────────────────────────────
-    // Researcher flags bad-faith rejection. Public counter only — no arbitration.
-    // Only the original researcher can dispute their own report.
+    /// @notice Flag a rejection as bad-faith. Public counter only — no arbitration.
+    /// @param reportId Target report (must be in Rejected state)
     function dispute(uint256 reportId)
         external
         reportExists(reportId)
@@ -160,7 +173,51 @@ contract AuditDisclosure is ZamaEthereumConfig {
         emit ReportDisputed(reportId, r.disputeCount);
     }
 
+    // ── getReport() ────────────────────────────────────────────────
+    /// @notice Pull all metadata for a report in one call.
+    /// @dev encSeverity intentionally excluded — raw euint8 handle is
+    ///      meaningless to a caller without FHE decrypt access.
+    /// @param reportId Target report
+    function getReport(uint256 reportId)
+        external
+        view
+        reportExists(reportId)
+        returns (
+            address researcher,
+            bytes32 descriptionHash,
+            Status  status,
+            uint256 submittedAt,
+            string memory rejectionReason,
+            uint256 disputeCount,
+            bool    revealed
+        )
+    {
+        Report storage r = reports[reportId];
+        return (
+            r.researcher,
+            r.descriptionHash,
+            r.status,
+            r.submittedAt,
+            r.rejectionReason,
+            r.disputeCount,
+            r.revealed
+        );
+    }
+
+    // ── getReportsByResearcher() ────────────────────────────────────
+    /// @notice Returns all reportIds submitted by a given researcher.
+    /// @dev Frontend uses this to populate a researcher's submission history.
+    /// @param researcher Wallet address to query
+    function getReportsByResearcher(address researcher)
+        external
+        view
+        returns (uint256[] memory)
+    {
+        return reportsByResearcher[researcher];
+    }
+
     // ── View helpers ───────────────────────────────────────────────
+    /// @notice Current state machine position for a report.
     function getStatus(uint256 reportId)
         external
         view
@@ -170,6 +227,7 @@ contract AuditDisclosure is ZamaEthereumConfig {
         return reports[reportId].status;
     }
 
+    /// @notice Rejection reason — empty string unless status is Rejected.
     function getRejectionReason(uint256 reportId)
         external
         view
@@ -179,6 +237,7 @@ contract AuditDisclosure is ZamaEthereumConfig {
         return reports[reportId].rejectionReason;
     }
 
+    /// @notice Returns true if the 7-day reveal window has passed.
     function isDeadlinePassed(uint256 reportId)
         external
         view
