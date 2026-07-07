@@ -82,14 +82,26 @@
 - `npm run build` confirmed passing clean after TS fixes
 - Vercel Deployment Protection disabled, redeployed with `vercel --prod`
 
+### July 5
+- `npm run build` confirmed passing clean (tsc + vite build, exit 0)
+- Relayer root cause confirmed: `relayer.testnet.zama.cloud` is dead (DNS
+  ENOTFOUND — HTTP 000). Found Zama community post (Dec 9, 2025) where team
+  member confirms new URL is `relayer.testnet.zama.org`. Verified new URL
+  responds at HTTP level (Kong gateway JSON).
+- Updated fhe.ts: spread SepoliaConfig, override relayerUrl to `.org` domain.
+  Same contract addresses, same SDK version — just DNS changed on Zama's side.
+- Build re-verified clean after the change
+- README updated: frontend section added (architecture, how to run, Vite/
+  Rolldown gotchas, relayer override rationale, frontend limitations)
+- Build log updated with July 5 entry
+
 ## Up Next
-1. Retest submit flow — check if relayer has recovered and whether the
-   explicit config change made any difference
-2. If relayer still down: document as known Sepolia infrastructure
-   limitation in README, proceed to record demo video showing UI/flow
-   regardless of one blocked live transaction
-3. Record demo video (under 3 minutes)
-4. Final README polish — frontend section, screenshots
+1. Retest submit flow end-to-end in browser with wallet on Sepolia — relayer
+   should now respond on the `.org` domain
+2. Record demo video (under 3 minutes) — show landing page, wallet connect,
+   submit flow, report list, owner controls
+3. Final README polish — screenshots from the live app
+4. Push to Vercel, confirm public URL is accessible
 
 ## Stack
 Hardhat 2.28.6 · FHEVM · Sepolia · Vite (Rolldown) · React + TypeScript ·

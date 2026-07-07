@@ -4,13 +4,21 @@
 import { createInstance, SepoliaConfig } from "@zama-fhe/relayer-sdk/web";
 import { CONTRACT_ADDRESS } from "./contract";
 
+// The relayer domain changed from .cloud to .org during Testnet v2 rollout
+// (Dec 2025). The SDK's shipped SepoliaConfig still points at the dead .cloud
+// domain, so we override it here. Same contract addresses — just a DNS change.
+const relayerConfig = {
+  ...SepoliaConfig,
+  relayerUrl: "https://relayer.testnet.zama.org",
+};
+
 let instancePromise: ReturnType<typeof createInstance> | null = null;
 
 // Instance creation is slow (loads WASM + fetches relayer public key) —
 // cache the promise so we only pay that cost once per session.
 export function getFhevmInstance() {
   if (!instancePromise) {
-    instancePromise = createInstance(SepoliaConfig);
+    instancePromise = createInstance(relayerConfig);
   }
   return instancePromise;
 }

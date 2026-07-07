@@ -7,7 +7,7 @@ Built for Zama's Developer Program Mainnet Season 3, Builder Track.
 **Live contract (Sepolia, verified):** `0x052EA0f42d522199bBd1BdD2E588f1c40c981102`
 [View on Etherscan](https://sepolia.etherscan.io/address/0x052EA0f42d522199bBd1BdD2E588f1c40c981102#code)
 
-**Frontend:** in progress — landing page live, disclosure app UI being wired to the contract now.
+**Frontend (live):** Vite + React + TypeScript — submit encrypted findings, track reports, owner approve/reject controls. See [Frontend](#frontend) below.
 
 ---
 
@@ -66,11 +66,58 @@ The 7-day auto-reveal is the mechanism that keeps the owner honest. Silence isn'
 
 ## Tech stack
 
+**Contract:**
 - **FHEVM** (Zama) — confidential Solidity extension for encrypted on-chain types
 - **Hardhat 2.28.6** — compile, test, deploy
 - **Sepolia** — testnet deployment
 - **hardhat-deploy** — deploy script management
 - **Chai / Mocha** — 10/10 tests passing in FHEVM mock mode
+
+**Frontend:**
+- **Vite 8** (Rolldown-based bundler, not classic esbuild) + **React 19** + **TypeScript 6**
+- **ethers.js v6.17** — contract interaction, wallet connect
+- **@zama-fhe/relayer-sdk v0.2.0** — client-side FHE encryption (WASM-loaded, talks to Zama's testnet relayer)
+- **Design:** dark UI (`#0A0B0D`), redaction-bar visual language — `▓▓▓ ENCRYPTED ▓▓▓` resolves to a number on reveal. JetBrains Mono for on-chain data, Inter for prose.
+
+## Frontend
+
+The app at `frontend/` is the research-facing interface for Redact. Landing page introduces the concept; the app view handles wallet connection, encrypted submission, report browsing, and owner controls.
+
+### What it does
+
+- **Landing page** — badge, headline, "How it works" 3-step breakdown, CTA to launch the app, link to the verified contract on Etherscan.
+- **Wallet connect** — detects Rabby/MetaMask/Backpack via `window.ethereum`, transitions to the app view.
+- **Submit a finding** — severity picker (1–4), report reference input (free text, IPFS CID, or link), encrypts client-side via the relayer SDK, submits to the contract.
+- **Report list** — reads all reports from the chain, shows status with the amber/teal/red/blue color system. Expand a report to see full metadata.
+- **Owner controls** — if the connected wallet is the contract owner, expand a pending report to approve (with ETH amount) or reject (with mandatory reason).
+- **Reveal** — if the 7-day deadline has passed, anyone can trigger the public reveal.
+- **Dispute** — the original researcher can flag a bad-faith rejection.
+
+### Running the frontend
+
+```bash
+cd frontend
+npm install
+npm run dev       # local dev server
+npm run build     # production build to dist/
+```
+
+### Vite/Rolldown notes
+
+This project uses Vite 8, which ships with Rolldown as its bundler (not esbuild or classic Rollup). Two consequences:
+
+1. **No WASM/top-level-await plugins.** `vite-plugin-wasm` and `vite-plugin-top-level-await` try to `require('esbuild')` or `require('rollup')` — neither exists in a Rolldown-based setup. Instead, `build.target: 'esnext'` in `vite.config.ts` natively supports both.
+2. **`global` polyfill via `define`.** The Zama relayer SDK references `global` (a Node.js-ism). Browsers don't have it. `define: { global: 'globalThis' }` in the Vite config patches this without pulling in a full Node polyfill.
+
+### Relayer URL override
+
+The SDK's shipped `SepoliaConfig` hardcodes `relayer.testnet.zama.cloud`, which went dead during the Testnet v2 rollout (Dec 2025). The new domain is `relayer.testnet.zama.org`. The frontend spreads `SepoliaConfig` and overrides `relayerUrl` — same contract addresses, just a DNS change on Zama's side.
+
+### Known limitations (frontend)
+
+- **Relayer dependency** — the submit flow depends entirely on Zama's testnet relayer being up. If the relayer returns errors or times out, encryption fails in-browser before any transaction is sent. No fallback relayer is configured.
+- **No ENS or address book** — report metadata shows raw addresses. No labeling or history beyond what the contract stores.
+- **Chain change triggers reload** — switching networks or accounts reloads the page rather than updating state in place. Functional, but not seamless.
 
 ## Setup
 
@@ -126,6 +173,8 @@ These are deliberate MVP scope cuts, not oversights:
 - Tried `hardhat-keystore` for encrypted secret storage instead of plaintext `vars`. Every published version needs Hardhat 3, this project's pinned to 2.28.6. Not compatible. Stuck with `vars` — fine tradeoff since the wallet behind it is a burner holding only testnet ETH.
 
 **Where the security background actually shows up in the code:** `approve()` sets status to `Approved` before the ETH transfer goes out — checks-effects-interactions, closes the reentrancy window a naive version would leave open. Every state change is gated by a modifier, not scattered inline checks. Authorization runs on `msg.sender`, never `tx.origin`.
+
+**July 5.** Frontend build and relayer fix. `npm run build` was passing clean already. Tracked down the submit-flow failure: the `SepoliaConfig` bundled in `@zama-fhe/relayer-sdk@0.2.0` points at `relayer.testnet.zama.cloud`, which is completely dead — DNS returns nothing. Found a Zama community post from Dec 2025 where a team member confirms the new domain is `relayer.testnet.zama.org`. Confirmed the new URL responds (Kong gateway, HTTP-level alive). Fix is a one-liner: spread `SepoliaConfig` and override `relayerUrl`. Same contract addresses, same SDK version, just the DNS changed out from under us. Also fleshed out the frontend section of this README — architecture, how to run, Vite/Rolldown gotchas, relayer override rationale, remaining frontend limitations.
 
 ## License
 

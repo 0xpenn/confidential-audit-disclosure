@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { BrowserProvider, Contract, parseEther } from "ethers";
 import { CONTRACT_ADDRESS, CONTRACT_ABI, STATUS_LABELS } from "./contract";
 import { encryptSeverity } from "./fhe";
@@ -15,6 +15,42 @@ type Report = {
   revealed: boolean;
 };
 
+// IntersectionObserver hook — adds .revealed class when element scrolls into view
+function useScrollReveal() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.add("revealed");
+          observer.unobserve(el);
+        }
+      },
+      { threshold: 0.15 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return ref;
+}
+
+function ScrollReveal({ children, className = "", delay = 0 }: {
+  children: React.ReactNode;
+  className?: string;
+  delay?: number;
+}) {
+  const ref = useScrollReveal();
+  return (
+    <div ref={ref} className={`reveal-on-scroll ${className}`} style={{ transitionDelay: `${delay}ms` }}>
+      {children}
+    </div>
+  );
+}
+
+// ─── Main App ──────────────────────────────────────────────
+
 function App() {
   const [view, setView] = useState<"landing" | "app">("landing");
   const [address, setAddress] = useState<string | null>(null);
@@ -25,6 +61,10 @@ function App() {
   const [descHash, setDescHash] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
+  const [wrongNetwork, setWrongNetwork] = useState(false);
+  const [activeTab, setActiveTab] = useState<"submit" | "reports">("submit");
+
+  const isOwner = owner?.toLowerCase() === address?.toLowerCase();
 
   const getContract = useCallback(async (needsSigner = false) => {
     if (!window.ethereum) throw new Error("No wallet found");
@@ -32,6 +72,41 @@ function App() {
     const signerOrProvider = needsSigner ? await provider.getSigner() : provider;
     return new Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signerOrProvider);
   }, []);
+
+  const switchToSepolia = async () => {
+    if (!window.ethereum) return;
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: "0xaa36a7" }],
+      });
+      setWrongNetwork(false);
+      if (address) await loadReports();
+    } catch (err: any) {
+      if (err?.code === 4902) {
+        try {
+          await window.ethereum.request({
+            method: "wallet_addEthereumChain",
+            params: [{
+              chainId: "0xaa36a7",
+              chainName: "Sepolia",
+              nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+              rpcUrls: ["https://eth-sepolia.public.blastapi.io"],
+              blockExplorerUrls: ["https://sepolia.etherscan.io"],
+            }],
+          });
+          setWrongNetwork(false);
+          if (address) await loadReports();
+        } catch (addErr) {
+          console.error(addErr);
+          setStatusMsg("Couldn't add Sepolia — add it manually in your wallet.");
+        }
+      } else {
+        console.error(err);
+        setStatusMsg("Network switch cancelled or failed.");
+      }
+    }
+  };
 
   const connectWallet = async () => {
     if (!window.ethereum) {
@@ -41,7 +116,18 @@ function App() {
     const provider = new BrowserProvider(window.ethereum);
     const accounts = await provider.send("eth_requestAccounts", []);
     setAddress(accounts[0]);
+
+    const network = await provider.getNetwork();
+    if (Number(network.chainId) !== 11155111) {
+      setWrongNetwork(true);
+      setStatusMsg("Switch to Sepolia to interact with the contract.");
+    } else {
+      setWrongNetwork(false);
+    }
     setView("app");
+
+    window.ethereum.on?.("chainChanged", () => window.location.reload());
+    window.ethereum.on?.("accountsChanged", () => window.location.reload());
   };
 
   const loadReports = useCallback(async () => {
@@ -175,6 +261,8 @@ function App() {
     }
   };
 
+  // ─── LANDING VIEW ────────────────────────────────────────
+
   if (view === "landing") {
     return (
       <div className="landing">
@@ -184,7 +272,7 @@ function App() {
         </nav>
 
         <div className="hero-inner">
-          <div className="badge">BUILT ON FHEVM · ZAMA PROTOCOL</div>
+          <div className="badge">Built on FHEVM · Zama Protocol</div>
 
           <h1 className="hero-title">
             Stays encrypted.<br />
@@ -208,41 +296,68 @@ function App() {
               View contract
             </a>
           </div>
-
-          <div className="footer-meta">
-            sepolia testnet · {CONTRACT_ADDRESS.slice(0, 6)}..{CONTRACT_ADDRESS.slice(-4)} · verified ✓
-          </div>
         </div>
 
-        <div className="how-it-works">
-          <div className="step-card">
-            <div className="step-number">01</div>
-            <div className="step-title">Submit</div>
-            <div className="step-desc">
-              Researcher encrypts a severity score (1–4) client-side and submits it
-              on-chain alongside a hash of the full report.
+        <ScrollReveal>
+          <div className="stats-bar">
+            <div className="stat-item">
+              <div className="stat-value">▓▓▓</div>
+              <div className="stat-label">Encrypted</div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-value">7d</div>
+              <div className="stat-label">Auto-reveal</div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-value">1–4</div>
+              <div className="stat-label">Severity</div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-value">1</div>
+              <div className="stat-label">Contract</div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-value">0</div>
+              <div className="stat-label">Intermediaries</div>
             </div>
           </div>
-          <div className="step-card">
-            <div className="step-number">02</div>
-            <div className="step-title">Owner decides</div>
-            <div className="step-desc">
-              Only the protocol owner can decrypt the score. They approve and pay,
-              or reject with a mandatory public reason.
+        </ScrollReveal>
+
+        <ScrollReveal delay={100}>
+          <div className="how-it-works">
+            <div className="step-card">
+              <div className="step-number">01</div>
+              <div className="step-title">Submit</div>
+              <div className="step-desc">
+                Researcher encrypts a severity score (1–4) client-side and submits it
+                on-chain alongside a hash of the full report.
+              </div>
+            </div>
+            <div className="step-card">
+              <div className="step-number">02</div>
+              <div className="step-title">Owner decides</div>
+              <div className="step-desc">
+                Only the protocol owner can decrypt the score. They approve and pay,
+                or reject with a mandatory public reason.
+              </div>
+            </div>
+            <div className="step-card">
+              <div className="step-number">03</div>
+              <div className="step-title">Reveal or payout</div>
+              <div className="step-desc">
+                If nothing happens within 7 days, the severity reveals publicly.
+                No pause, no exceptions — the deadline is trustless.
+              </div>
             </div>
           </div>
-          <div className="step-card">
-            <div className="step-number">03</div>
-            <div className="step-title">Reveal or payout</div>
-            <div className="step-desc">
-              If nothing happens within 7 days, the severity reveals publicly.
-              No pause, no exceptions — the deadline is trustless.
-            </div>
-          </div>
-        </div>
+        </ScrollReveal>
+
+        <Footer />
       </div>
     );
   }
+
+  // ─── APP VIEW ────────────────────────────────────────────
 
   return (
     <div className="app-shell">
@@ -255,51 +370,99 @@ function App() {
 
       {statusMsg && <div className="status-bar">{statusMsg}</div>}
 
-      <div className="submit-card">
-        <div className="card-label">Submit a finding</div>
-        <div className="severity-picker">
-          {[1, 2, 3, 4].map((s) => (
-            <button
-              key={s}
-              className={`severity-btn ${severity === s ? "selected" : ""}`}
-              onClick={() => setSeverity(s)}
-            >
-              {s} {["low", "med", "high", "crit"][s - 1]}
-            </button>
-          ))}
+      {wrongNetwork && (
+        <div className="status-bar" style={{ borderColor: "rgba(184, 92, 92, 0.3)", color: "#B85C5C", background: "rgba(184, 92, 92, 0.04)" }}>
+          Wrong network —{" "}
+          <button
+            onClick={switchToSepolia}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#B85C5C",
+              textDecoration: "underline",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              fontSize: "inherit",
+              padding: 0,
+            }}
+          >
+            switch to Sepolia
+          </button>
         </div>
-        <input
-          className="hash-input"
-          placeholder="Report reference (link, IPFS CID, or free text)"
-          value={descHash}
-          onChange={(e) => setDescHash(e.target.value)}
-        />
-        <button className="btn-primary full-width" onClick={handleSubmit} disabled={submitting}>
-          {submitting ? "Submitting..." : "Encrypt and submit"}
+      )}
+
+      <div className="app-tabs">
+        <button
+          className={`app-tab ${activeTab === "submit" ? "active" : ""}`}
+          onClick={() => setActiveTab("submit")}
+        >
+          Submit
+        </button>
+        <button
+          className={`app-tab ${activeTab === "reports" ? "active" : ""}`}
+          onClick={() => setActiveTab("reports")}
+        >
+          Reports {reports.length > 0 && `(${reports.length})`}
         </button>
       </div>
 
-      <div className="reports-section">
-        <div className="card-label">Reports {loading && "· loading..."}</div>
-        {reports.length === 0 && !loading && (
-          <div className="empty-state">No reports yet.</div>
-        )}
-        {reports.map((r) => (
-          <ReportRow
-            key={r.id}
-            report={r}
-            isOwner={owner?.toLowerCase() === address?.toLowerCase()}
-            isResearcher={r.researcher.toLowerCase() === address?.toLowerCase()}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            onReveal={handleReveal}
-            onDispute={handleDispute}
+      {activeTab === "submit" && (
+        <div className="submit-card">
+          <div className="card-label">Submit a finding</div>
+          <div className="severity-picker">
+            {[1, 2, 3, 4].map((s) => (
+              <button
+                key={s}
+                className={`severity-btn ${severity === s ? "selected" : ""}`}
+                onClick={() => setSeverity(s)}
+              >
+                {s} {["", "low", "med", "high", "crit"][s]}
+              </button>
+            ))}
+          </div>
+          <input
+            className="hash-input"
+            placeholder="Report reference (link, IPFS CID, or free text)"
+            value={descHash}
+            onChange={(e) => setDescHash(e.target.value)}
           />
-        ))}
-      </div>
+          <button
+            className="btn-primary full-width"
+            onClick={handleSubmit}
+            disabled={submitting || wrongNetwork}
+          >
+            {wrongNetwork ? "Switch to Sepolia" : submitting ? "Submitting..." : "Encrypt and submit"}
+          </button>
+        </div>
+      )}
+
+      {activeTab === "reports" && (
+        <div className="reports-section">
+          <div className="card-label">Reports {loading && "· loading..."}</div>
+          {reports.length === 0 && !loading && (
+            <div className="empty-state">No reports yet.</div>
+          )}
+          {reports.map((r) => (
+            <ReportRow
+              key={r.id}
+              report={r}
+              isOwner={isOwner}
+              isResearcher={r.researcher.toLowerCase() === address?.toLowerCase()}
+              onApprove={handleApprove}
+              onReject={handleReject}
+              onReveal={handleReveal}
+              onDispute={handleDispute}
+            />
+          ))}
+        </div>
+      )}
+
+      <Footer />
     </div>
   );
 }
+
+// ─── Report Row ────────────────────────────────────────────
 
 function ReportRow({
   report,
@@ -386,6 +549,47 @@ function ReportRow({
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Footer ────────────────────────────────────────────────
+
+function Footer() {
+  return (
+    <footer className="site-footer">
+      <div className="footer-grid">
+        <div className="footer-brand">
+          <div className="logo"><span className="amber">▓</span>redact</div>
+          <p className="footer-tagline">
+            Confidential vulnerability disclosure on FHEVM. Severity stays encrypted
+            until an outcome is reached, or seven days force a public reveal.
+          </p>
+          <div className="footer-chip">Sepolia · Live</div>
+        </div>
+
+        <div className="footer-column">
+          <h4>Product</h4>
+          <ul>
+            <li><a href="#how">How it works</a></li>
+            <li><a href={`https://sepolia.etherscan.io/address/${CONTRACT_ADDRESS}#code`} target="_blank" rel="noreferrer">Contract</a></li>
+            <li><a href="https://github.com/0xpenn/confidential-audit-disclosure" target="_blank" rel="noreferrer">GitHub</a></li>
+          </ul>
+        </div>
+
+        <div className="footer-column">
+          <h4>Protocol</h4>
+          <ul>
+            <li><a href="https://www.zama.org/" target="_blank" rel="noreferrer">Zama Protocol</a></li>
+            <li><a href="https://docs.zama.org/" target="_blank" rel="noreferrer">FHEVM Docs</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div className="footer-bottom">
+        <span>© 2026 Redact · Built on the Zama Protocol</span>
+        <span>Severity encrypted end-to-end</span>
+      </div>
+    </footer>
   );
 }
 
